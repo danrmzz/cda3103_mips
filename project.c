@@ -6,10 +6,16 @@
 void ALU(unsigned A,unsigned B,char ALUControl,unsigned *ALUresult,char *Zero)
 {
     switch(ALUControl) {
-        case 0: // Assuming 0 is the control code for addition
+        case 0: // Addition
             *ALUresult = A + B;
             break;
-        // Implement other cases as needed
+        case 2: // SLT (Set on Less Than)
+            *ALUresult = (A < B) ? 1 : 0; // Set *ALUresult to 1 if A < B, else 0
+            break;
+        case 3: // SLTU (Set on Less Than, unsigned)
+            *ALUresult = (A < B) ? 1 : 0;
+            break;
+        // Add other cases as necessary
     }
     *Zero = (*ALUresult == 0) ? 1 : 0;
 }
@@ -46,34 +52,34 @@ void instruction_partition(unsigned instruction, unsigned *op, unsigned *r1,unsi
 /* 15 Points */
 int instruction_decode(unsigned op,struct_controls *controls)
 {
-    switch(op) {
-        case 0x00: // This is the opcode for R-type instructions
-            controls->RegDst = 1;  // The destination register is rd for R-type instructions like 'add'
-            controls->ALUSrc = 0;  // The second operand is the register for 'add'
-            controls->RegWrite = 1;  // Enable writing back to the register
-            // ALUOp does not need to be set here for 'add'; it's determined by the funct field in ALU_operations
-            return 0;
-        case 0x08: // Opcode for 'addi'
-            controls->RegDst = 0;  // The destination register is rt for I-type instructions like 'addi'
-            controls->ALUSrc = 1;  // The second operand is the immediate value for 'addi'
-            controls->RegWrite = 1;  // Enable writing back to the register
-            controls->ALUOp = 0;  // Set ALUOp to indicate addition
-            return 0;
-        case 0x2B: // Opcode for 'sw'
-            controls->ALUSrc = 1; // Use the immediate value as the second ALU operand
-            controls->MemWrite = 1; // Enable writing to memory
-            controls->RegWrite = 0; // Disable writing back to the register
-            controls->ALUOp = 0; // Set ALUOp to indicate addition for address calculation
-            return 0;
-        case 0x23: // Opcode for 'lw'
-            controls->ALUSrc = 1;  // Use the immediate value as the second ALU operand
-            controls->MemRead = 1;  // Enable reading from memory
-            controls->RegWrite = 1;  // Enable writing back to the register
-            controls->MemtoReg = 1;  // Indicate that data for the write back comes from memory
-            controls->ALUOp = 0;  // Set ALUOp to indicate addition for address calculation
-            return 0;
+    memset(controls, 0, sizeof(struct_controls)); // Clear previous control signals
+
+    switch (op) {
+        case 0x00: // R-type instructions
+            controls->RegDst = 1; controls->RegWrite = 1;
+            controls->ALUOp = 7; // Assuming 7 signals an R-type for ALUOp decision
+            break;
+        case 0x02: // j (Jump)
+            controls->Jump = 1;
+            break;
+        case 0x23: // lw
+            controls->ALUSrc = 1; controls->MemtoReg = 1;
+            controls->RegWrite = 1; controls->MemRead = 1;
+            controls->ALUOp = 0; // Addition for memory address calculation
+            break;
+        case 0x2B: // sw
+            controls->ALUSrc = 1; controls->MemWrite = 1;
+            controls->ALUOp = 0; // Addition for memory address calculation
+            break;
+        case 0x08: // addi
+            controls->ALUSrc = 1; controls->RegWrite = 1;
+            controls->ALUOp = 0; // Directly to ALU addition operation
+            break;
+        // Handle other I-type and R-type instructions as needed
+        default:
+            return 1; // Unrecognized opcode
     }
-    return 1; // Halt condition for unrecognized opcodes
+    return 0;
 }
 
 /* Read Register */
@@ -102,13 +108,31 @@ void sign_extend(unsigned offset,unsigned *extended_value)
 /* 10 Points */
 int ALU_operations(unsigned data1,unsigned data2,unsigned extended_value,unsigned funct,char ALUOp,char ALUSrc,unsigned *ALUresult,char *Zero)
 {
-    if (ALUOp == 0) { // Handle addition; works for both 'add' and 'addi'
-        // Choose the second operand based on ALUSrc; for 'addi', it's the extended immediate value
-        unsigned secondOperand = ALUSrc ? extended_value : data2;
-        ALU(data1, secondOperand, ALUOp, ALUresult, Zero);
+    // Determine the operation based on ALUOp and funct (for R-type instructions)
+    unsigned operation = ALUOp;
+    if(ALUOp == 7) { // Assuming 7 indicates an R-type instruction requiring funct decoding
+        switch(funct) {
+            case 0x20: // add
+                operation = 0; break;
+            case 0x22: // sub
+                operation = 1; break;
+            case 0x2A: // slt
+                operation = 2; break;
+            case 0x2B: // sltu
+                operation = 3; break;
+            // Add more R-type operations here
+            default:
+                return 1; // Unrecognized function code
+        }
     }
-    // Add more cases as needed for other operations
-    return 0;
+
+    // Select the correct operand based on ALUSrc
+    unsigned B = ALUSrc ? extended_value : data2;
+
+    // Perform the ALU operation
+    ALU(data1, B, operation, ALUresult, Zero);
+
+    return 0; // Success
 }
 
 /* Read / Write Memory */
@@ -152,7 +176,17 @@ void write_register(unsigned r2,unsigned r3,unsigned memdata,unsigned ALUresult,
 /* 10 Points */
 void PC_update(unsigned jsec,unsigned extended_value,char Branch,char Jump,char Zero,unsigned *PC)
 {
-    *PC += 4; // Increment PC to the next instruction
-    // Additional logic for jumps and branches will be needed here
+    // Standard PC increment
+    *PC += 4;
+
+    // Handle jump instructions
+    if (Jump) {
+        *PC = (jsec << 2) | (*PC & 0xf0000000); // Assuming jsec is the lower 28 bits of the target
+    }
+
+    // Handle branch instructions
+    if (Branch && Zero) {
+        *PC += (extended_value << 2); // Assuming extended_value is sign-extended offset
+    }
 }
 
