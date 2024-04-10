@@ -65,6 +65,13 @@ int instruction_decode(unsigned op,struct_controls *controls)
             controls->RegWrite = 0; // Disable writing back to the register
             controls->ALUOp = 0; // Set ALUOp to indicate addition for address calculation
             return 0;
+        case 0x23: // Opcode for 'lw'
+            controls->ALUSrc = 1;  // Use the immediate value as the second ALU operand
+            controls->MemRead = 1;  // Enable reading from memory
+            controls->RegWrite = 1;  // Enable writing back to the register
+            controls->MemtoReg = 1;  // Indicate that data for the write back comes from memory
+            controls->ALUOp = 0;  // Set ALUOp to indicate addition for address calculation
+            return 0;
     }
     return 1; // Halt condition for unrecognized opcodes
 }
@@ -108,14 +115,19 @@ int ALU_operations(unsigned data1,unsigned data2,unsigned extended_value,unsigne
 /* 10 Points */
 int rw_memory(unsigned ALUresult,unsigned data2,char MemWrite,char MemRead,unsigned *memdata,unsigned *Mem)
 {
-    if (MemWrite) {
-        if (ALUresult % 4 != 0) // Check for word alignment
-            return 1; // Return 1 to indicate a halt condition due to misalignment
+    if (MemRead) {
+        if (ALUresult % 4 != 0)  // Check for word alignment
+            return 1;  // Return 1 to indicate a halt condition due to misalignment
         
-        Mem[ALUresult >> 2] = data2; // Store the data into memory at the calculated address
+        *memdata = Mem[ALUresult >> 2];  // Load the data from memory at the calculated address
     }
-    // Include MemRead logic here if needed for future operations like 'load word (lw)'
-    return 0; // No halt condition; continue execution
+    if (MemWrite) {
+        if (ALUresult % 4 != 0)  // Check for word alignment
+            return 1;  // Return 1 to indicate a halt condition due to misalignment
+        
+        Mem[ALUresult >> 2] = data2;  // Store the data into memory at the calculated address
+    }
+    return 0;  // No halt condition; continue execution
 }
 
 
@@ -124,8 +136,15 @@ int rw_memory(unsigned ALUresult,unsigned data2,char MemWrite,char MemRead,unsig
 void write_register(unsigned r2,unsigned r3,unsigned memdata,unsigned ALUresult,char RegWrite,char RegDst,char MemtoReg,unsigned *Reg)
 {
     if (RegWrite) {
-        unsigned destReg = RegDst ? r3 : r2; // Choose rd (r3) for R-type (e.g., 'add'), rt (r2) for I-type (e.g., 'addi')
-        Reg[destReg] = ALUresult; // Write the ALU result to the chosen destination register
+        // For I-type instructions like 'lw', MemtoReg being 1 implies the destination should be r2 (rt field).
+        // This approach uses MemtoReg as an indirect hint for 'lw', given the absence of a direct opcode check.
+        unsigned destReg = (MemtoReg) ? r2 : (RegDst ? r3 : r2);  // Prioritizes MemtoReg for selecting rt for 'lw'.
+        
+        unsigned writeData = MemtoReg ? memdata : ALUresult;  // Chooses between memory data and ALU result.
+        
+        printf("Writing %u to register %u\n", writeData, destReg); // Debug print for verification.
+        
+        Reg[destReg] = writeData;
     }
 }
 
