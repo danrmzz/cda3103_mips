@@ -31,11 +31,13 @@ int instruction_fetch(unsigned PC,unsigned *Mem,unsigned *instruction)
 /* 10 Points */
 void instruction_partition(unsigned instruction, unsigned *op, unsigned *r1,unsigned *r2, unsigned *r3, unsigned *funct, unsigned *offset, unsigned *jsec)
 {
-    *op = (instruction >> 26) & 0x3F; // Extracts the opcode
-    *r1 = (instruction >> 21) & 0x1F; // Source register (rs)
-    *r2 = (instruction >> 16) & 0x1F; // Target register (rt)
-    *offset = instruction & 0xFFFF; // Immediate value
-    // Note: For 'addi', r3, funct, and jsec are not used
+    *op = (instruction >> 26) & 0x3F;
+    *r1 = (instruction >> 21) & 0x1F; // rs
+    *r2 = (instruction >> 16) & 0x1F; // rt
+    *r3 = (instruction >> 11) & 0x1F; // rd for R-type, like 'add'
+    *funct = instruction & 0x3F; // funct field for R-type
+    *offset = instruction & 0xFFFF; // Immediate value, used for I-type like 'addi'
+    // jsec not used here
 }
 
 
@@ -45,13 +47,26 @@ void instruction_partition(unsigned instruction, unsigned *op, unsigned *r1,unsi
 int instruction_decode(unsigned op,struct_controls *controls)
 {
     switch(op) {
-        case 0x08: // Assuming opcode for 'addi' is 0x08
-            controls->ALUSrc = 1;
-            controls->RegWrite = 1;
-            controls->ALUOp = 0; // Assuming '0' is the control code for addition
+        case 0x00: // This is the opcode for R-type instructions
+            controls->RegDst = 1;  // The destination register is rd for R-type instructions like 'add'
+            controls->ALUSrc = 0;  // The second operand is the register for 'add'
+            controls->RegWrite = 1;  // Enable writing back to the register
+            // ALUOp does not need to be set here for 'add'; it's determined by the funct field in ALU_operations
+            return 0;
+        case 0x08: // Opcode for 'addi'
+            controls->RegDst = 0;  // The destination register is rt for I-type instructions like 'addi'
+            controls->ALUSrc = 1;  // The second operand is the immediate value for 'addi'
+            controls->RegWrite = 1;  // Enable writing back to the register
+            controls->ALUOp = 0;  // Set ALUOp to indicate addition
+            return 0;
+        case 0x2B: // Opcode for 'sw'
+            controls->ALUSrc = 1; // Use the immediate value as the second ALU operand
+            controls->MemWrite = 1; // Enable writing to memory
+            controls->RegWrite = 0; // Disable writing back to the register
+            controls->ALUOp = 0; // Set ALUOp to indicate addition for address calculation
             return 0;
     }
-    return 1; // Return 1 for unrecognized opcodes (halt condition)
+    return 1; // Halt condition for unrecognized opcodes
 }
 
 /* Read Register */
@@ -80,18 +95,27 @@ void sign_extend(unsigned offset,unsigned *extended_value)
 /* 10 Points */
 int ALU_operations(unsigned data1,unsigned data2,unsigned extended_value,unsigned funct,char ALUOp,char ALUSrc,unsigned *ALUresult,char *Zero)
 {
-    // For `addi`, ALUSrc should be 1, indicating the second operand is the immediate value (sign-extended)
-    if (ALUSrc == 1) {
-        ALU(data1, extended_value, ALUOp, ALUresult, Zero); // Assuming ALUOp for addition is correctly set
+    if (ALUOp == 0) { // Handle addition; works for both 'add' and 'addi'
+        // Choose the second operand based on ALUSrc; for 'addi', it's the extended immediate value
+        unsigned secondOperand = ALUSrc ? extended_value : data2;
+        ALU(data1, secondOperand, ALUOp, ALUresult, Zero);
     }
-    return 0; // Assuming no halt conditions for now
+    // Add more cases as needed for other operations
+    return 0;
 }
 
 /* Read / Write Memory */
 /* 10 Points */
 int rw_memory(unsigned ALUresult,unsigned data2,char MemWrite,char MemRead,unsigned *memdata,unsigned *Mem)
 {
-
+    if (MemWrite) {
+        if (ALUresult % 4 != 0) // Check for word alignment
+            return 1; // Return 1 to indicate a halt condition due to misalignment
+        
+        Mem[ALUresult >> 2] = data2; // Store the data into memory at the calculated address
+    }
+    // Include MemRead logic here if needed for future operations like 'load word (lw)'
+    return 0; // No halt condition; continue execution
 }
 
 
@@ -100,8 +124,8 @@ int rw_memory(unsigned ALUresult,unsigned data2,char MemWrite,char MemRead,unsig
 void write_register(unsigned r2,unsigned r3,unsigned memdata,unsigned ALUresult,char RegWrite,char RegDst,char MemtoReg,unsigned *Reg)
 {
     if (RegWrite) {
-        if (MemtoReg == 0) // For `addi`, the result does not come from memory
-            Reg[r2] = ALUresult; // Assuming r2 is the destination register for `addi`
+        unsigned destReg = RegDst ? r3 : r2; // Choose rd (r3) for R-type (e.g., 'add'), rt (r2) for I-type (e.g., 'addi')
+        Reg[destReg] = ALUresult; // Write the ALU result to the chosen destination register
     }
 }
 
