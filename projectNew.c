@@ -75,11 +75,12 @@ int instruction_fetch(unsigned PC,unsigned *Mem,unsigned *instruction)
         return 1; // Halt condition: PC is not word-aligned
     }
 
-    // Memory bounds check: PC must be within the 64kB range
-    if ((PC >> 2) >= 65536 / sizeof(unsigned)) {
-        printf("Halt: Address is beyond the memory bounds.\n");
-        return 1; // Halt condition: Address is beyond the memory bounds
-    }
+    // Project hints only mentions word alignment check
+    // // Memory bounds check: PC must be within the 64kB range
+    // if ((PC >> 2) >= 65536 / sizeof(unsigned)) {
+    //     printf("Halt: Address is beyond the memory bounds.\n");
+    //     return 1; // Halt condition: Address is beyond the memory bounds
+    // }
 
     // If no halt conditions, fetch the instruction
     *instruction = Mem[PC >> 2];
@@ -93,7 +94,26 @@ int instruction_fetch(unsigned PC,unsigned *Mem,unsigned *instruction)
 /* 10 Points */
 void instruction_partition(unsigned instruction, unsigned *op, unsigned *r1,unsigned *r2, unsigned *r3, unsigned *funct, unsigned *offset, unsigned *jsec)
 {
+    // instruction [31-26]
+    *op = (instruction >> 26) & 0x3F;
 
+    // instruction [25-21]
+    *r1 = (instruction >> 21) & 0x1F;
+
+    // instruction [20-16]
+    *r2 = (instruction >> 16) & 0x1F;
+
+    // instruction [15-11]
+    *r3 = (instruction >> 11) & 0x1F;
+
+    // instruction [5-0]
+    *funct = (instruction >> 0) & 0x3F; // can also be: instruction & 0x3F;
+
+    // instruction [15-0]
+    *offset = instruction & 0xFFFF;
+
+    // instruction [25-0]
+    *jsec = instruction & 0x03FFFFFF;
 }
 
 
