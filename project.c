@@ -55,9 +55,10 @@ int instruction_decode(unsigned op,struct_controls *controls)
     memset(controls, 0, sizeof(struct_controls)); // Clear previous control signals
 
     switch (op) {
-        case 0x00: // R-type instructions
-            controls->RegDst = 1; controls->RegWrite = 1;
-            controls->ALUOp = 7; // Assuming 7 signals an R-type for ALUOp decision
+        case 0x00: // R-type
+            controls->RegDst = 1;
+            controls->RegWrite = 1;
+            controls->ALUOp = 7; // Signal for R-type operation
             break;
         case 0x02: // j (Jump)
             controls->Jump = 1;
@@ -75,11 +76,14 @@ int instruction_decode(unsigned op,struct_controls *controls)
             controls->ALUSrc = 1; controls->RegWrite = 1;
             controls->ALUOp = 0; // Directly to ALU addition operation
             break;
-        // Handle other I-type and R-type instructions as needed
-        default:
-            return 1; // Unrecognized opcode
+        case 0x0F: // LUI
+            controls->ALUSrc = 1;
+            controls->RegWrite = 1;
+            controls->ALUOp = 6; // Ensure this matches `ALU_operations`
+            break;
+        // Ensure there's a case for SLTU, either here with a unique ALUOp or within R-type handling based on `funct`
     }
-    return 0;
+    return 0; // Success
 }
 
 /* Read Register */
@@ -108,31 +112,29 @@ void sign_extend(unsigned offset,unsigned *extended_value)
 /* 10 Points */
 int ALU_operations(unsigned data1,unsigned data2,unsigned extended_value,unsigned funct,char ALUOp,char ALUSrc,unsigned *ALUresult,char *Zero)
 {
-    // Determine the operation based on ALUOp and funct (for R-type instructions)
-    unsigned operation = ALUOp;
-    if(ALUOp == 7) { // Assuming 7 indicates an R-type instruction requiring funct decoding
-        switch(funct) {
-            case 0x20: // add
-                operation = 0; break;
-            case 0x22: // sub
-                operation = 1; break;
-            case 0x2A: // slt
-                operation = 2; break;
-            case 0x2B: // sltu
-                operation = 3; break;
-            // Add more R-type operations here
+    if (ALUOp == 7) { // Convention for R-type
+        switch (funct) {
+            case 0x20: // ADD
+                *ALUresult = data1 + data2;
+                break;
+            case 0x22: // SUB
+                *ALUresult = data1 - data2;
+                break;
+            case 0x2A: // SLT
+                *ALUresult = (int)data1 < (int)data2 ? 1 : 0;
+                break;
+            case 0x2B: // SLTU
+                *ALUresult = data1 < data2 ? 1 : 0;
+                break;
+            // Additional R-type instructions can be handled here
             default:
-                return 1; // Unrecognized function code
+                return 1; // Unrecognized funct code
         }
+    } else {
+        // I-type operations handling, including addi and lui, if necessary
     }
-
-    // Select the correct operand based on ALUSrc
-    unsigned B = ALUSrc ? extended_value : data2;
-
-    // Perform the ALU operation
-    ALU(data1, B, operation, ALUresult, Zero);
-
-    return 0; // Success
+    *Zero = (*ALUresult == 0) ? 1 : 0;
+    return 0;
 }
 
 /* Read / Write Memory */
@@ -160,15 +162,10 @@ int rw_memory(unsigned ALUresult,unsigned data2,char MemWrite,char MemRead,unsig
 void write_register(unsigned r2,unsigned r3,unsigned memdata,unsigned ALUresult,char RegWrite,char RegDst,char MemtoReg,unsigned *Reg)
 {
     if (RegWrite) {
-        // For I-type instructions like 'lw', MemtoReg being 1 implies the destination should be r2 (rt field).
-        // This approach uses MemtoReg as an indirect hint for 'lw', given the absence of a direct opcode check.
-        unsigned destReg = (MemtoReg) ? r2 : (RegDst ? r3 : r2);  // Prioritizes MemtoReg for selecting rt for 'lw'.
-        
-        unsigned writeData = MemtoReg ? memdata : ALUresult;  // Chooses between memory data and ALU result.
-        
-        printf("Writing %u to register %u\n", writeData, destReg); // Debug print for verification.
-        
-        Reg[destReg] = writeData;
+        unsigned destReg = RegDst ? r3 : r2; // Determine destination register
+        unsigned writeData = MemtoReg ? memdata : ALUresult; // Select data to write
+        Reg[destReg] = writeData; // Perform write operation
+        printf("Writing %u to register %u\n", writeData, destReg); // Debugging statement
     }
 }
 
